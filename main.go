@@ -3,30 +3,25 @@ package main
 import (
 	"bufio"
 	"os"
+
+    "io"
 )
 
 func main() {
     // copy STDIN to STDOUT
-    reader := bufio.NewReader(os.Stdin)
+    reader := io.Reader(os.Stdin)
     writer := bufio.NewWriter(os.Stdout)
     defer writer.Flush()
 
-    scanner := bufio.NewScanner(reader)
-
+    buffer := make([]byte, 1024 * 16)
     for {
-        ok := scanner.Scan()
+        n, readErr := io.ReadFull(reader, buffer)
+        _, writeErr := writer.Write(buffer[:n])
 
-        if !ok {
+        if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
             break
+        } else if writeErr != nil {
+            panic(writeErr)
         }
-
-        slice := scanner.Bytes()
-
-        writer.Write(slice)
-    }
-
-    err := scanner.Err()
-    if err != nil {
-        panic(err)
     }
 }
