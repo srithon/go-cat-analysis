@@ -1,17 +1,14 @@
 package main
 
 import (
-	"bufio"
-	"os"
-
+    "os"
     "io"
 )
 
 func main() {
     // copy STDIN to STDOUT
     reader := io.Reader(os.Stdin)
-    writer := bufio.NewWriter(os.Stdout)
-    defer writer.Flush()
+    writer := io.Writer(os.Stdout)
 
     buffer := make([]byte, 1024 * 16)
     for {
