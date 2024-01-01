@@ -1,4 +1,126 @@
-#+TITLE: cat
+#+TITLE: Golang ~cat~ Analysis
 
-This is a very trivial implementation of `cat` in Golang, for directly comparing the performance of Golang vs C.
-I wanted to do this to address performance issues I was having in my Golang `tr` implementation, which was /significantly/ slower than stock `tr`, for reasons that escaped me.
+This is a very trivial implementation of ~cat~ in Golang---more specifically the functionality of copying STDIN to STDOUT---for directly comparing the performance of Golang vs C.
+I wanted to do this to address performance issues I was having in my Golang `tr` implementation, which was /significantly/ slower than stock ~tr~, for reasons which at the time escaped me.
+What follows is a commit-by-commit breakdown of exactly what was causing my performance issues.
+
+* Commit History
+** #7cfe008 - *27x* slower than ~cat~!
+This was my initial implementation, which shared the same flaws as my ~tr~ implementation.
+While writing the code, I believed that simply using buffered IO would be sufficient to make this otherwise-syscall-heavy code fast.
+However, what I failed to realize is that in this code, the buffered reader is _only_ serving to reduce syscalls.
+The brunt of the time taken is caused by our byte-by-byte reading/writing as well as our error handling.
+
+Here's an overview of the pitfalls of the main processing loop:
+1. Function calls in any language have overhead related to stack manipulation, restoring registers, etc; by solely using ~ReadByte()~ and ~WriteByte()~, we are doing $2n$ function calls, where ~n~ is the number of bytes in the input. However, the Go compiler inlines function calls aggressively, so the function call overhead may not be a significant factor.
+2. Both ~ReadByte~ and ~WriteByte~ have internal logic for determining whether a ~read~ system call is required, or if it can return directly from the buffer. This overhead takes approximately the same amount of time regardless of the read size; therefore, calling ~{Read,Write}Byte~ $2n$ times (rather than *batch-processing* $k$ bytes at a time, and calling these functions only $~\frac{2n}{k}$ times) adds a significant amount of computation.
+3. In a similar vein, our /own/ error-handling logic (the 2 conditions) is also running $2n$ times; If we instead read ~k~ bytes at a time and only checked for errors at the end, we could have it run only $\frac{2n}{k}$ times! The ~read~ syscall will handle any premature errors on its own with no additional overhead for us, so reading byte-by-byte and checking for errors every single time has no benefit.
+#+begin_src go
+func main() {
+    // copy STDIN to STDOUT
+    reader := bufio.NewReader(os.Stdin)
+    writer := bufio.NewWriter(os.Stdout)
+    defer writer.Flush()
+
+    for {
+        byte, err := reader.ReadByte()
+        if err == io.EOF {
+            break
+        } else if err != nil {
+            panic(err)
+        }
+
+        writer.WriteByte(byte)
+    }
+}
+#+end_src
+
+** #e6e1830 - 16x slower than ~cat~
+At this point, I was completely grasping for straws, and so I was blindly changing things to see how I could make it faster.
+In this commit, I changed the code to use a `Scanner` after seeing [[https://codeforces.com/blog/entry/121037?#comment-1074136][this comment]] responding to a CodeForces post asking about Go's slow IO, which mentioned that `Scanner.Bytes()` is faster than `Scanner.Text()`.
+This didn't apply to my issue at all, but it /did/ put me onto the right track, seeing that batch-processing /even amidst buffering/ brings about significant performance improvements.
+By default, ~bufio.NewScanner~ splits line-by-line (meaning that ~scanner.Bytes()~ would yield one line at a time), and so in this code we were reducing the number of loop iterations by a factor of (in spirit) the average line length.
+#+begin_src go
+func main() {
+    // copy STDIN to STDOUT
+    reader := bufio.NewReader(os.Stdin)
+    writer := bufio.NewWriter(os.Stdout)
+    defer writer.Flush()
+
+    scanner := bufio.NewScanner(reader)
+
+    for {
+        ok := scanner.Scan()
+
+        if !ok {
+            break
+        }
+
+        slice := scanner.Bytes()
+
+        writer.Write(slice)
+    }
+
+    err := scanner.Err()
+    if err != nil {
+        panic(err)
+    }
+}
+#+end_src
+
+** #5268086 - 1.6x slower than ~cat~
+The previous commit put me on track for realizing the issue, but this commit confirmed my suspicions.
+In this implementation, I dropped the buffered reader entirely and simply read 16K bytes at a time.
+Looking back at the previous reasoning, this meant that the loop would iterate up to 16K less times!
+However, ~ReadFull~'s behavior differed from ~cat~'s; while ~cat~ would /immediately/ echo incoming data, ~ReadFull~ would wait until the buffer was /completely filled/, or the input reached EOF.
+This meant that for a fixed $n$ (number of bytes), the loop would /always/ run at most $\frac{n}{16K}$ times (the lower bound given $n$ and the buffer size), whereas /just/ using ~Read~, which returns immediately after reading whatever data is /currently/ in the stream, in the worst case the loop could run $n$ times---if each ~Read~ call only yielded one byte.
+#+begin_src go
+func main() {
+    // copy STDIN to STDOUT
+    reader := io.Reader(os.Stdin)
+    writer := bufio.NewWriter(os.Stdout)
+    defer writer.Flush()
+
+    buffer := make([]byte, 1024 * 16)
+    for {
+        n, readErr := io.ReadFull(reader, buffer)
+        _, writeErr := writer.Write(buffer[:n])
+
+        if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
+            break
+        } else if writeErr != nil {
+            panic(writeErr)
+        }
+    }
+}
+#+end_src
+
+** #e246d94 - Still 1.6x slower than ~cat~!
+In this commit, I changed ~ReadFull~ to ~Read~, to bring our implementation in line with ~cat~, and was delighted to see that it didn't negatively performance with respect to ~cat~ in my (one) test case: piping in ~seq 1 100000~.
+Now that we have all of our context, this makes sense; because ~cat~ also processes its input without buffering, it must incur these same costs!
+#+begin_src diff
+@@ -15,7 +15,7 @@ func main() {
+ 
+     buffer := make([]byte, 1024 * 16)
+     for {
+-        n, readErr := io.ReadFull(reader, buffer)
++        n, readErr := reader.Read(buffer)
+         _, writeErr := writer.Write(buffer[:n])
+ 
+         if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
+#+end_src
+
+** #3ea6562 - Hooray! Still 1.6x slower than ~cat~!
+In this final commit, I swapped out the buffered writer for a regular writer, to bring it completely in line with ~cat~.
+Now, not only does our program /process/ incoming data with each ~read~ syscall, but it also outputs the data immediately rather than waiting for ~flush~.
+#+begin_src diff
+func main() {
+     // copy STDIN to STDOUT
+     reader := io.Reader(os.Stdin)
+-    writer := bufio.NewWriter(os.Stdout)
+-    defer writer.Flush()
++    writer := io.Writer(os.Stdout)
+ 
+     buffer := make([]byte, 1024 * 16)
+     for {
+#+end_src
