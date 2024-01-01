@@ -10,11 +10,6 @@ This was my initial implementation, which shared the same flaws as my ~tr~ imple
 While writing the code, I believed that simply using buffered IO would be sufficient to make this otherwise-syscall-heavy code fast.
 However, what I failed to realize is that in this code, the buffered reader is _only_ serving to reduce syscalls.
 The brunt of the time taken is caused by our byte-by-byte reading/writing as well as our error handling.
-
-Here's an overview of the pitfalls of the main processing loop:
-1. Function calls in any language have overhead related to stack manipulation, restoring registers, etc; by solely using ~ReadByte()~ and ~WriteByte()~, we are doing $2n$ function calls, where ~n~ is the number of bytes in the input. However, the Go compiler inlines function calls aggressively, so the function call overhead may not be a significant factor.
-2. Both ~ReadByte~ and ~WriteByte~ have internal logic for determining whether a ~read~ system call is required, or if it can return directly from the buffer. This overhead takes approximately the same amount of time regardless of the read size; therefore, calling ~{Read,Write}Byte~ $2n$ times (rather than *batch-processing* $k$ bytes at a time, and calling these functions only $~\frac{2n}{k}$ times) adds a significant amount of computation.
-3. In a similar vein, our /own/ error-handling logic (the 2 conditions) is also running $2n$ times; If we instead read ~k~ bytes at a time and only checked for errors at the end, we could have it run only $\frac{2n}{k}$ times! The ~read~ syscall will handle any premature errors on its own with no additional overhead for us, so reading byte-by-byte and checking for errors every single time has no benefit.
 #+begin_src go
 func main() {
     // copy STDIN to STDOUT
@@ -35,6 +30,10 @@ func main() {
 }
 #+end_src
 
+Here's an overview of the pitfalls of the main processing loop:
+1. Function calls in any language have overhead related to stack manipulation, restoring registers, etc; by solely using ~ReadByte()~ and ~WriteByte()~, we are doing $2n$ function calls, where ~n~ is the number of bytes in the input. However, the Go compiler inlines function calls aggressively, so the function call overhead may not be a significant factor.
+2. Both ~ReadByte~ and ~WriteByte~ have internal logic for determining whether a ~read~ system call is required, or if it can return directly from the buffer. This overhead takes approximately the same amount of time regardless of the read size; therefore, calling ~{Read,Write}Byte~ $2n$ times (rather than *batch-processing* $k$ bytes at a time, and calling these functions only $~\frac{2n}{k}$ times) adds a significant amount of computation.
+3. In a similar vein, our /own/ error-handling logic (the 2 conditions) is also running $2n$ times; If we instead read ~k~ bytes at a time and only checked for errors at the end, we could have it run only $\frac{2n}{k}$ times! The ~read~ syscall will handle any premature errors on its own with no additional overhead for us, so reading byte-by-byte and checking for errors every single time has no benefit.
 ** [[https://github.com/srithon/go-cat-analysis/blob/e6e18307d9871ad5f42cb023ba67d3547603fda5/main.go][e6e1830]] - 16x slower than ~cat~
 At this point, I was completely grasping for straws, and so I was blindly changing things to see how I could make it faster.
 In this commit, I changed the code to use a ~Scanner~ after seeing [[https://codeforces.com/blog/entry/121037?#comment-1074136][this comment]] responding to a CodeForces post asking about Go's slow IO, which mentioned that ~Scanner.Bytes()~ is faster than ~Scanner.Text()~.
