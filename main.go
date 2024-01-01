@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"io"
 	"os"
 )
 
@@ -12,14 +11,22 @@ func main() {
     writer := bufio.NewWriter(os.Stdout)
     defer writer.Flush()
 
+    scanner := bufio.NewScanner(reader)
+
     for {
-        byte, err := reader.ReadByte()
-        if err == io.EOF {
+        ok := scanner.Scan()
+
+        if !ok {
             break
-        } else if err != nil {
-            panic(err)
         }
 
-        writer.WriteByte(byte)
+        slice := scanner.Bytes()
+
+        writer.Write(slice)
+    }
+
+    err := scanner.Err()
+    if err != nil {
+        panic(err)
     }
 }
