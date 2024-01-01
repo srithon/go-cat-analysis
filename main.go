@@ -15,7 +15,7 @@ func main() {
 
     buffer := make([]byte, 1024 * 16)
     for {
-        n, readErr := io.ReadFull(reader, buffer)
+        n, readErr := reader.Read(buffer)
         _, writeErr := writer.Write(buffer[:n])
 
         if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
