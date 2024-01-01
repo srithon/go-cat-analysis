@@ -1,0 +1,4 @@
+#+TITLE: cat
+
+This is a very trivial implementation of `cat` in Golang, for directly comparing the performance of Golang vs C.
+I wanted to do this to address performance issues I was having in my Golang `tr` implementation, which was /significantly/ slower than stock `tr`, for reasons that escaped me.
