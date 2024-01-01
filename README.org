@@ -5,7 +5,7 @@ I wanted to do this to address performance issues I was having in my Golang `tr`
 What follows is a commit-by-commit breakdown of exactly what was causing my performance issues.
 
 * Commit History
-** #7cfe008 - *27x* slower than ~cat~!
+** [[https://github.com/srithon/go-cat-analysis/blob/7cfe00858a04692ca092e9a31c1818f320c189d4/main.go][7cfe008]] - *27x* slower than ~cat~!
 This was my initial implementation, which shared the same flaws as my ~tr~ implementation.
 While writing the code, I believed that simply using buffered IO would be sufficient to make this otherwise-syscall-heavy code fast.
 However, what I failed to realize is that in this code, the buffered reader is _only_ serving to reduce syscalls.
@@ -35,7 +35,7 @@ func main() {
 }
 #+end_src
 
-** #e6e1830 - 16x slower than ~cat~
+** [[https://github.com/srithon/go-cat-analysis/blob/e6e18307d9871ad5f42cb023ba67d3547603fda5/main.go][e6e1830]] - 16x slower than ~cat~
 At this point, I was completely grasping for straws, and so I was blindly changing things to see how I could make it faster.
 In this commit, I changed the code to use a `Scanner` after seeing [[https://codeforces.com/blog/entry/121037?#comment-1074136][this comment]] responding to a CodeForces post asking about Go's slow IO, which mentioned that `Scanner.Bytes()` is faster than `Scanner.Text()`.
 This didn't apply to my issue at all, but it /did/ put me onto the right track, seeing that batch-processing /even amidst buffering/ brings about significant performance improvements.
@@ -68,7 +68,7 @@ func main() {
 }
 #+end_src
 
-** #5268086 - 1.6x slower than ~cat~
+** [[https://github.com/srithon/go-cat-analysis/blob/526808603738f3f231a3985abebeeb5fe3330096/main.go][5268086]] - 1.6x slower than ~cat~
 The previous commit put me on track for realizing the issue, but this commit confirmed my suspicions.
 In this implementation, I dropped the buffered reader entirely and simply read 16K bytes at a time.
 Looking back at the previous reasoning, this meant that the loop would iterate up to 16K less times!
@@ -95,7 +95,7 @@ func main() {
 }
 #+end_src
 
-** #e246d94 - Still 1.6x slower than ~cat~!
+** [[https://github.com/srithon/go-cat-analysis/blob/e246d94ba9d52675d893edc278f5e9a7609c3be8/main.go][e246d94]] - Still 1.6x slower than ~cat~!
 In this commit, I changed ~ReadFull~ to ~Read~, to bring our implementation in line with ~cat~, and was delighted to see that it didn't negatively performance with respect to ~cat~ in my (one) test case: piping in ~seq 1 100000~.
 Now that we have all of our context, this makes sense; because ~cat~ also processes its input without buffering, it must incur these same costs!
 #+begin_src diff
@@ -110,7 +110,7 @@ Now that we have all of our context, this makes sense; because ~cat~ also proces
          if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
 #+end_src
 
-** #3ea6562 - Hooray! Still 1.6x slower than ~cat~!
+** [[https://github.com/srithon/go-cat-analysis/blob/3ea6562ee7602b97a2f3ef174e5182745e6d30a6/main.go][3ea6562]] - Hooray! Still 1.6x slower than ~cat~!
 In this final commit, I swapped out the buffered writer for a regular writer, to bring it completely in line with ~cat~.
 Now, not only does our program /process/ incoming data with each ~read~ syscall, but it also outputs the data immediately rather than waiting for ~flush~.
 #+begin_src diff
