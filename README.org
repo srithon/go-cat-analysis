@@ -1,7 +1,7 @@
 #+TITLE: Golang ~cat~ Analysis
 
 This is a very trivial implementation of ~cat~ in Golang---more specifically the functionality of copying STDIN to STDOUT---for directly comparing the performance of Golang vs C.
-I wanted to do this to address performance issues I was having in my Golang `tr` implementation, which was /significantly/ slower than stock ~tr~, for reasons which at the time escaped me.
+I wanted to do this to address performance issues I was having in my Golang ~tr~ implementation, which was /significantly/ slower than stock ~tr~, for reasons which at the time escaped me.
 What follows is a commit-by-commit breakdown of exactly what was causing my performance issues.
 
 * Commit History
@@ -37,7 +37,7 @@ func main() {
 
 ** [[https://github.com/srithon/go-cat-analysis/blob/e6e18307d9871ad5f42cb023ba67d3547603fda5/main.go][e6e1830]] - 16x slower than ~cat~
 At this point, I was completely grasping for straws, and so I was blindly changing things to see how I could make it faster.
-In this commit, I changed the code to use a `Scanner` after seeing [[https://codeforces.com/blog/entry/121037?#comment-1074136][this comment]] responding to a CodeForces post asking about Go's slow IO, which mentioned that `Scanner.Bytes()` is faster than `Scanner.Text()`.
+In this commit, I changed the code to use a ~Scanner~ after seeing [[https://codeforces.com/blog/entry/121037?#comment-1074136][this comment]] responding to a CodeForces post asking about Go's slow IO, which mentioned that ~Scanner.Bytes()~ is faster than ~Scanner.Text()~.
 This didn't apply to my issue at all, but it /did/ put me onto the right track, seeing that batch-processing /even amidst buffering/ brings about significant performance improvements.
 By default, ~bufio.NewScanner~ splits line-by-line (meaning that ~scanner.Bytes()~ would yield one line at a time), and so in this code we were reducing the number of loop iterations by a factor of (in spirit) the average line length.
 #+begin_src go
